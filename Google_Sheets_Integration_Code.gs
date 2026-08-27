@@ -582,7 +582,8 @@ function renderLogsSheet(ss, candidates, committees, evaluations) {
     var candEvals = evaluations[cand.id] || {};
     committees.forEach(function (comm) {
       var ev = candEvals[comm.id];
-      if (ev && (ev.isSubmitted || ev.verdict || (ev.scores && Object.keys(ev.scores).length > 0))) {
+      // Record in logs sheet ONLY when evaluation is officially submitted
+      if (ev && ev.isSubmitted) {
         var weightedTotal = calculateWeightedTotalScore(ev.scores || {});
         var timeStr = ev.updatedAt ? Utilities.formatDate(new Date(ev.updatedAt), "Asia/Bangkok", "dd/MM/yyyy HH:mm:ss") : Utilities.formatDate(new Date(), "Asia/Bangkok", "dd/MM/yyyy HH:mm:ss");
 

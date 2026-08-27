@@ -149,8 +149,9 @@
   }
 
   // Save State
-  function saveState(broadcast) {
+  function saveState(broadcast, syncGSheets) {
     if (broadcast === undefined) broadcast = true;
+    if (syncGSheets === undefined) syncGSheets = false;
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify({
         candidates: state.candidates,
@@ -174,7 +175,7 @@
 
       syncToServer();
 
-      if (broadcast) {
+      if (syncGSheets) {
         syncToGoogleSheets(true);
       }
     } catch (e) {
@@ -197,7 +198,22 @@
         Object.keys(commMap).forEach(function (commId) {
           var incoming = commMap[commId];
           var existing = state.evaluations[candKey][commId];
-          if (!existing || (incoming.updatedAt && incoming.updatedAt > (existing.updatedAt || 0))) {
+
+          var isCurrentActiveComm = (commId === state.currentCommitteeId);
+
+          if (incoming.isSubmitted) {
+            // Incoming submitted assessment wins over local unsubmitted
+            if (existing && existing.isSubmitted && existing.updatedAt && incoming.updatedAt && existing.updatedAt > incoming.updatedAt) {
+              return; // Local submitted is newer
+            }
+          } else {
+            // Incoming is not submitted: protect active committee draft
+            if (isCurrentActiveComm) {
+              return;
+            }
+          }
+
+          if (!existing || (incoming.updatedAt && incoming.updatedAt > (existing.updatedAt || 0)) || (incoming.isSubmitted && (!existing.isSubmitted))) {
             state.evaluations[candKey][commId] = incoming;
             changed = true;
           }
@@ -1309,7 +1325,7 @@
       // KPI Key Metrics Row
       '<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">' +
       '<div class="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm flex items-center justify-between">' +
-      '<div><span class="text-xs font-semibold text-slate-500 block">ผู้ขอรับทุนทั้งหมด</span><span class="text-3xl font-black text-slate-900">' + totalCandidates + ' ท่าน</span><span class="text-[11px] text-blue-600 mt-0.5 block">ครบตามเกณฑ์ PDF</span></div>' +
+      '<div><span class="text-xs font-semibold text-slate-500 block">ผู้ขอรับทุนทั้งหมด</span><span class="text-3xl font-black text-slate-900">' + totalCandidates + ' ท่าน</span></div>' +
       '<div class="w-12 h-12 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center text-xl font-black">👥</div>' +
       '</div>' +
       '<div class="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm flex items-center justify-between">' +
@@ -1807,12 +1823,52 @@
     if (hWeighted) hWeighted.innerText = scoreTotals.weightedTotal.toFixed(2);
     if (hRaw) hRaw.innerText = scoreTotals.rawTotal;
 
+    var scoreStyles = {
+      1: {
+        unselected: 'bg-rose-50/70 text-rose-700 hover:bg-rose-100 hover:border-rose-300 border-rose-200 border',
+        selected: 'bg-gradient-to-tr from-rose-600 to-red-500 text-white shadow-lg shadow-rose-600/30 ring-2 ring-rose-500 ring-offset-2 scale-[1.03]'
+      },
+      2: {
+        unselected: 'bg-amber-50/70 text-amber-800 hover:bg-amber-100 hover:border-amber-300 border-amber-200 border',
+        selected: 'bg-gradient-to-tr from-amber-600 to-orange-500 text-white shadow-lg shadow-amber-600/30 ring-2 ring-amber-500 ring-offset-2 scale-[1.03]'
+      },
+      3: {
+        unselected: 'bg-sky-50/70 text-sky-800 hover:bg-sky-100 hover:border-sky-300 border-sky-200 border',
+        selected: 'bg-gradient-to-tr from-sky-600 to-blue-500 text-white shadow-lg shadow-sky-600/30 ring-2 ring-sky-500 ring-offset-2 scale-[1.03]'
+      },
+      4: {
+        unselected: 'bg-blue-50/70 text-blue-800 hover:bg-blue-100 hover:border-blue-300 border-blue-200 border',
+        selected: 'bg-gradient-to-tr from-blue-700 via-indigo-600 to-indigo-700 text-white shadow-lg shadow-indigo-600/30 ring-2 ring-indigo-500 ring-offset-2 scale-[1.03]'
+      },
+      5: {
+        unselected: 'bg-emerald-50/70 text-emerald-800 hover:bg-emerald-100 hover:border-emerald-300 border-emerald-200 border',
+        selected: 'bg-gradient-to-tr from-emerald-600 to-teal-500 text-white shadow-lg shadow-emerald-600/30 ring-2 ring-emerald-500 ring-offset-2 scale-[1.03]'
+      }
+    };
+
     if (window.ASSESSMENT_DATA && window.ASSESSMENT_DATA.criteria) {
       window.ASSESSMENT_DATA.criteria.forEach(function (c) {
         var raw = Number(evalData.scores[c.id]) || 0;
         var weighted = window.ASSESSMENT_DATA.calculateCriterionWeightedScore(raw, c.weight);
         var wEl = document.getElementById('weighted-score-' + c.id);
         if (wEl) wEl.innerText = weighted.toFixed(2);
+
+        var rDesc = document.getElementById('rubric-desc-' + c.id);
+        if (rDesc) {
+          rDesc.innerText = raw > 0 ? (c.rubric && c.rubric[raw] ? c.rubric[raw] : ('ระดับคะแนน ' + raw)) : 'โปรดเลือกระดับคะแนน (1 - 5)';
+          rDesc.className = 'text-xs ' + (raw === 5 ? 'text-emerald-700 font-bold' : raw === 4 ? 'text-indigo-700 font-bold' : raw === 3 ? 'text-sky-700 font-bold' : raw === 2 ? 'text-amber-700 font-bold' : raw === 1 ? 'text-rose-700 font-bold' : 'text-slate-400 font-normal');
+        }
+
+        var card = document.getElementById('criteria-card-' + c.id);
+        if (card) {
+          var btns = card.querySelectorAll('button[onclick*="setCriteriaScore"]');
+          btns.forEach(function (btn, idx) {
+            var scoreVal = idx + 1;
+            var isSel = (raw === scoreVal);
+            var st = scoreStyles[scoreVal] || scoreStyles[3];
+            btn.className = 'group relative flex-1 py-2.5 sm:py-3 px-1 sm:px-2 rounded-xl text-center font-bold text-sm md:text-base transition-all duration-150 ' + (isSel ? st.selected : st.unselected);
+          });
+        }
       });
     }
   }
@@ -1828,7 +1884,7 @@
     state.evaluations[candId][commId].updatedAt = Date.now();
 
     saveState(true);
-    renderEvaluatorForm(true);
+    renderEvaluatorForm(false); // In-place DOM update for maximum 60fps speed
     renderCandidateCardBanner();
     renderCommitteeNav();
   }
@@ -1848,7 +1904,7 @@
     state.evaluations[candId][commId].updatedAt = Date.now();
 
     saveState(true);
-    renderEvaluatorForm(true);
+    renderEvaluatorForm(false);
     renderCandidateCardBanner();
     renderCommitteeNav();
   }
@@ -1868,7 +1924,7 @@
     state.evaluations[candId][commId].updatedAt = Date.now();
 
     saveState(true);
-    renderEvaluatorForm(true);
+    renderEvaluatorForm(false);
     renderCandidateCardBanner();
     renderCommitteeNav();
   }
@@ -1913,10 +1969,11 @@
     state.evaluations[candId][commId].isSubmitted = true; // Final step auto-submits & confirms
     state.evaluations[candId][commId].updatedAt = Date.now();
 
-    saveState(true);
+    saveState(true, true); // Immediately push to Google Sheets and broadcast
     renderEvaluatorForm(true);
     renderCandidateCardBanner();
     renderCommitteeNav();
+    showToast('📤 บันทึกและส่งผลการประเมินไปยัง Google Sheets สำเร็จเรียบร้อย!', 'success');
 
     if (typeof confetti !== 'undefined' && verdict === 'PASS') {
       confetti({
@@ -2104,10 +2161,11 @@
     state.evaluations[candId][commId].isSubmitted = true;
     state.evaluations[candId][commId].updatedAt = Date.now();
 
-    saveState(true);
+    saveState(true, true);
     renderEvaluatorForm(true);
     renderCandidateCardBanner();
     renderCommitteeNav();
+    showToast('✅ บันทึกและส่งผลการประเมินไปยัง Google Sheets เรียบร้อยแล้ว!', 'success');
   }
 
   // ==========================================
@@ -2650,7 +2708,7 @@
       });
     }
 
-    saveState(true);
+    saveState(true, true);
     renderAdminControlCenter();
     renderCommitteeNav();
     showToast('ล้างคะแนนการประเมินทั้งหมดในระบบเรียบร้อยแล้ว', 'success');
@@ -2685,7 +2743,7 @@
       });
     }
 
-    saveState(true);
+    saveState(true, true);
     renderCandidateSelector();
     renderAdminControlCenter();
     renderCommitteeNav();
@@ -3011,11 +3069,20 @@
   var googleSyncTimer = null;
   var isSyncingWithSheets = false;
 
+  function getEffectiveGSheetsUrl() {
+    var stored = localStorage.getItem('BAFS_GSHEETS_URL');
+    if (!stored || stored.indexOf('AKfycbyH8mlX4NPCGOZKiH3V9LfpMRoaAhRtTDAYE') > -1) {
+      localStorage.setItem('BAFS_GSHEETS_URL', DEFAULT_GSHEETS_URL);
+      return DEFAULT_GSHEETS_URL;
+    }
+    return stored;
+  }
+
   function openGoogleSheetsModal() {
     var modal = document.getElementById('google-sheets-modal');
     var input = document.getElementById('gs-webhook-url');
     if (input) {
-      input.value = localStorage.getItem('BAFS_GSHEETS_URL') || DEFAULT_GSHEETS_URL;
+      input.value = getEffectiveGSheetsUrl();
     }
     if (modal) modal.classList.remove('hidden');
   }
@@ -3041,7 +3108,7 @@
     if (input && input.value.trim()) {
       localStorage.setItem('BAFS_GSHEETS_URL', input.value.trim());
     }
-    var url = localStorage.getItem('BAFS_GSHEETS_URL') || DEFAULT_GSHEETS_URL;
+    var url = getEffectiveGSheetsUrl();
     if (!url) {
       if (!isAuto) openGoogleSheetsModal();
       return;
@@ -3078,7 +3145,7 @@
     if (input && input.value.trim()) {
       localStorage.setItem('BAFS_GSHEETS_URL', input.value.trim());
     }
-    var url = localStorage.getItem('BAFS_GSHEETS_URL') || DEFAULT_GSHEETS_URL;
+    var url = getEffectiveGSheetsUrl();
     if (!url) {
       if (!isAuto) openGoogleSheetsModal();
       return;
@@ -3109,6 +3176,21 @@
             Object.keys(commMap).forEach(function (commId) {
               var inEv = commMap[commId];
               var localEv = state.evaluations[candKey][commId];
+
+              var isCurrentActiveComm = (commId === state.currentCommitteeId);
+
+              if (inEv.isSubmitted) {
+                // Incoming submitted assessment wins over local unsubmitted
+                if (localEv && localEv.isSubmitted && localEv.updatedAt && inEv.updatedAt && (localEv.updatedAt > inEv.updatedAt)) {
+                  return; // Local submitted is newer
+                }
+              } else {
+                // Incoming is not submitted: protect active committee draft
+                if (isCurrentActiveComm) {
+                  return;
+                }
+              }
+
               if (!localEv || JSON.stringify(inEv.scores) !== JSON.stringify(localEv.scores) || inEv.verdict !== localEv.verdict || inEv.isSubmitted !== localEv.isSubmitted || inEv.comments !== localEv.comments) {
                 state.evaluations[candKey][commId] = inEv;
                 hasChanges = true;
@@ -3131,6 +3213,9 @@
               }
             }
 
+            renderCandidateCardBanner();
+            renderCommitteeNav();
+            renderCandidateSelector();
             showSyncIndicator();
             if (!isAuto) {
               showToast('🔄 ดึงข้อมูลล่าสุดจาก Google Sheets สำเร็จ!', 'success');
