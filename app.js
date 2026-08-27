@@ -68,7 +68,10 @@
       // 7. Setup window listeners
       setupEventListeners();
 
-      // 8. Poll server if active
+      // 8. Auto-sync with Google Sheets (Real-Time 2-Way Cloud Sync)
+      startGoogleSheetsAutoSync();
+
+      // 9. Poll local server if active
       setInterval(pollServerState, 3000);
     } catch (err) {
       console.error('Initialization error:', err);
@@ -184,8 +187,22 @@
     var changed = false;
 
     if (payload.evaluations) {
-      state.evaluations = payload.evaluations;
-      changed = true;
+      // Smart merge: only update entries that are newer (by updatedAt timestamp)
+      Object.keys(payload.evaluations).forEach(function (candKey) {
+        if (!state.evaluations[candKey]) {
+          state.evaluations[candKey] = {};
+          changed = true;
+        }
+        var commMap = payload.evaluations[candKey];
+        Object.keys(commMap).forEach(function (commId) {
+          var incoming = commMap[commId];
+          var existing = state.evaluations[candKey][commId];
+          if (!existing || (incoming.updatedAt && incoming.updatedAt > (existing.updatedAt || 0))) {
+            state.evaluations[candKey][commId] = incoming;
+            changed = true;
+          }
+        });
+      });
     }
     if (payload.candidates && JSON.stringify(state.candidates) !== JSON.stringify(payload.candidates)) {
       state.candidates = payload.candidates;
@@ -216,7 +233,8 @@
   // Backend Sync
   async function checkServerConnection() {
     try {
-      var res = await fetch('/api/state', { method: 'GET', cache: 'no-store' });
+      var ts = new Date().getTime();
+      var res = await fetch('/api/state?_t=' + ts, { method: 'GET', cache: 'no-store' });
       if (res.ok) {
         var data = await res.json();
         state.serverConnected = true;
@@ -237,7 +255,8 @@
   async function pollServerState() {
     if (!state.serverConnected) return;
     try {
-      var res = await fetch('/api/state', { method: 'GET', cache: 'no-store' });
+      var ts = new Date().getTime();
+      var res = await fetch('/api/state?_t=' + ts, { method: 'GET', cache: 'no-store' });
       if (res.ok) {
         var data = await res.json();
         if (data && data.timestamp) {
@@ -280,12 +299,10 @@
   function showSyncIndicator() {
     var syncDot = document.getElementById('sync-indicator');
     if (syncDot) {
-      syncDot.classList.remove('opacity-0');
-      syncDot.classList.add('opacity-100');
+      syncDot.classList.add('ring-2', 'ring-emerald-400', 'bg-emerald-100');
       setTimeout(function () {
-        syncDot.classList.remove('opacity-100');
-        syncDot.classList.add('opacity-0');
-      }, 1200);
+        syncDot.classList.remove('ring-2', 'ring-emerald-400', 'bg-emerald-100');
+      }, 800);
     }
   }
 
@@ -798,12 +815,14 @@
       var passCount = 0;
       var failCount = 0;
       var submittedCount = 0;
+      var evaluatedCommCount = 0;
       var commDetails = [];
 
       committees.forEach(function (comm) {
         var ev = cEvals[comm.id] || { scores: {} };
         var totals = window.ASSESSMENT_DATA.calculateTotalScores(ev.scores || {});
         totalWeightedScore += totals.weightedTotal;
+        if (totals.weightedTotal > 0) evaluatedCommCount++;
         if (ev.verdict === 'PASS') passCount++;
         if (ev.verdict === 'FAIL') failCount++;
         if (ev.isSubmitted) submittedCount++;
@@ -822,7 +841,7 @@
         });
       });
 
-      var avgScore = Number((totalWeightedScore / committees.length).toFixed(2));
+      var avgScore = evaluatedCommCount > 0 ? Number((totalWeightedScore / evaluatedCommCount).toFixed(2)) : 0;
       var isPass = (passCount === 5);
 
       // Individual committee verdicts breakdown (Prominent Cards with score & status pill)
@@ -1128,19 +1147,21 @@
       var passCount = 0;
       var failCount = 0;
       var submittedCount = 0;
+      var evaluatedCommCount = 0;
 
       committees.forEach(function (comm) {
         var ev = cEvals[comm.id];
         if (ev) {
           var t = window.ASSESSMENT_DATA.calculateTotalScores(ev.scores || {});
           totalWeightedScore += t.weightedTotal;
+          if (t.weightedTotal > 0) evaluatedCommCount++;
           if (ev.verdict === 'PASS') passCount++;
           if (ev.verdict === 'FAIL') failCount++;
           if (ev.isSubmitted) submittedCount++;
         }
       });
 
-      var avgScore = Number((totalWeightedScore / totalCommittees).toFixed(2));
+      var avgScore = evaluatedCommCount > 0 ? Number((totalWeightedScore / evaluatedCommCount).toFixed(2)) : 0;
       var isPass = (passCount === 5);
       if (isPass) totalPassedCandidates++;
 
@@ -1288,7 +1309,7 @@
       // KPI Key Metrics Row
       '<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">' +
       '<div class="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm flex items-center justify-between">' +
-      '<div><span class="text-xs font-semibold text-slate-500 block">ผู้ขอรับทุนทั้งหมด</span><span class="text-3xl font-black text-slate-900">' + totalCandidates + ' ท่าน</span><span class="text-[11px] text-blue-600 mt-0.5 block">ครบตามเกณฑ์ PDF</span></div>' +
+      '<div><span class="text-xs font-semibold text-slate-500 block">ผู้ขอรับทุนทั้งหมด</span><span class="text-3xl font-black text-slate-900">' + totalCandidates + ' ท่าน</span></div>' +
       '<div class="w-12 h-12 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center text-xl font-black">👥</div>' +
       '</div>' +
       '<div class="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm flex items-center justify-between">' +
@@ -2107,18 +2128,20 @@
       var passCount = 0;
       var failCount = 0;
       var submittedCount = 0;
+      var evaluatedCommCount = 0;
 
       committees.forEach(function (comm) {
         var ev = candEvals[comm.id];
         if (ev) {
           var t = window.ASSESSMENT_DATA.calculateTotalScores(ev.scores || {});
           totalWeightedScoreSum += t.weightedTotal;
+          if (t.weightedTotal > 0) evaluatedCommCount++;
           if (ev.verdict === 'PASS') passCount++;
           if (ev.verdict === 'FAIL') failCount++;
           if (ev.isSubmitted) submittedCount++;
         }
       });
-      var avgScore = (totalWeightedScoreSum / committees.length).toFixed(2);
+      var avgScore = evaluatedCommCount > 0 ? (totalWeightedScoreSum / evaluatedCommCount).toFixed(2) : '0.00';
       var isFutureLeader = (c.nineBoxGrid === 'Future Leader');
       var badgeColor = isFutureLeader ? 'bg-emerald-100 text-emerald-800' : 'bg-blue-100 text-blue-800';
 
@@ -2366,14 +2389,16 @@
       var evals = state.evaluations[c.id] || {};
       var totalScore = 0;
       var subCount = 0;
+      var evalCount = 0;
       committees.forEach(function (comm) {
         if (evals[comm.id]) {
           var t = window.ASSESSMENT_DATA.calculateTotalScores(evals[comm.id].scores || {});
           totalScore += t.weightedTotal;
+          if (t.weightedTotal > 0) evalCount++;
           if (evals[comm.id].isSubmitted) subCount++;
         }
       });
-      var avgScore = committees.length > 0 ? (totalScore / committees.length).toFixed(2) : '0.00';
+      var avgScore = evalCount > 0 ? (totalScore / evalCount).toFixed(2) : '0.00';
 
       return '<tr class="hover:bg-slate-50/80 border-b border-slate-100 transition-colors">' +
         '<td class="px-4 py-3.5 text-center text-xs font-bold text-slate-400">' + (idx + 1) + '</td>' +
@@ -2730,7 +2755,8 @@
         if (ev && ev.verdict === 'PASS') passCount++;
         if (ev && ev.verdict === 'FAIL') failCount++;
       });
-      var avgScore = Number((commScores.reduce(function (a, b) { return a + b; }, 0) / committees.length).toFixed(2));
+      var nonZeroScores = commScores.filter(function (s) { return s > 0; });
+      var avgScore = nonZeroScores.length > 0 ? Number((nonZeroScores.reduce(function (a, b) { return a + b; }, 0) / nonZeroScores.length).toFixed(2)) : 0;
       var isPass = (passCount === 5);
       var finalVerdict = isPass ? 'ผ่านการคัดเลือก (มติเอกฉันท์ 5/5)' : (failCount > 0 ? 'ไม่ผ่านการคัดเลือก' : 'รอสรุปผล');
 
@@ -2981,7 +3007,7 @@
   // ==========================================
   // GOOGLE SHEETS 2-WAY REAL-TIME SYNC ENGINE
   // ==========================================
-  var DEFAULT_GSHEETS_URL = "https://script.google.com/macros/s/AKfycbyH8mlX4NPCGOZKiH3V9LfpMRoaAhRtTDAYEgT4r0CumTeT5H9fERtL61RYTHVazuwx/exec";
+  var DEFAULT_GSHEETS_URL = "https://script.google.com/macros/s/AKfycbwaRjgOcfM1Ys6sr3EJFOFORikL4e1Y4242zd9wMVlRui-ycB4BC16fI_no_VfU0Gsd/exec";
   var googleSyncTimer = null;
   var isSyncingWithSheets = false;
 
@@ -3030,10 +3056,10 @@
 
     fetch(url, {
       method: 'POST',
-      mode: 'no-cors',
-      headers: { 'Content-Type': 'application/json' },
+      redirect: 'follow',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify(payload)
-    }).then(function () {
+    }).then(function (response) {
       state.lastSyncTimestamp = Date.now();
       showSyncIndicator();
       if (!isAuto) {
@@ -3060,8 +3086,11 @@
     if (isSyncingWithSheets) return;
 
     isSyncingWithSheets = true;
-    fetch(url, {
+    var fetchUrl = url + (url.indexOf('?') > -1 ? '&' : '?') + '_t=' + new Date().getTime();
+    
+    fetch(fetchUrl, {
       method: 'GET',
+      cache: 'no-store',
       headers: { 'Accept': 'application/json' }
     }).then(function (response) {
       return response.json();
@@ -3080,7 +3109,7 @@
             Object.keys(commMap).forEach(function (commId) {
               var inEv = commMap[commId];
               var localEv = state.evaluations[candKey][commId];
-              if (!localEv || JSON.stringify(inEv.scores) !== JSON.stringify(localEv.scores) || inEv.verdict !== localEv.verdict) {
+              if (!localEv || JSON.stringify(inEv.scores) !== JSON.stringify(localEv.scores) || inEv.verdict !== localEv.verdict || inEv.isSubmitted !== localEv.isSubmitted || inEv.comments !== localEv.comments) {
                 state.evaluations[candKey][commId] = inEv;
                 hasChanges = true;
               }
@@ -3090,9 +3119,17 @@
           if (hasChanges) {
             state.lastSyncTimestamp = Date.now();
             saveState(false);
-            if (state.viewMode === 'dashboard') renderDashboard();
-            else if (state.viewMode === 'comparison') renderComparisonView();
-            else if (state.viewMode === 'evaluator') renderEvaluatorForm(true);
+            if (state.viewMode === 'dashboard') {
+              renderDashboard();
+            } else if (state.viewMode === 'comparison') {
+              renderComparisonView();
+            } else if (state.viewMode === 'evaluator') {
+              var activeEl = document.activeElement;
+              var isFocusedInput = activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA');
+              if (!isFocusedInput) {
+                renderEvaluatorForm(false);
+              }
+            }
 
             showSyncIndicator();
             if (!isAuto) {
@@ -3115,13 +3152,19 @@
 
   function startGoogleSheetsAutoSync() {
     if (googleSyncTimer) clearInterval(googleSyncTimer);
+    // Continuous 2-way cloud auto-sync loop (every 3.5s)
     googleSyncTimer = setInterval(function () {
       syncFromGoogleSheets(true);
-    }, 15000);
+    }, 3500);
+
+    // Immediate bootsync on startup
+    setTimeout(function () {
+      syncFromGoogleSheets(true);
+    }, 150);
 
     setTimeout(function () {
       syncFromGoogleSheets(true);
-    }, 2500);
+    }, 1500);
   }
 
   function copyGoogleAppsScriptCode() {

@@ -250,6 +250,7 @@ function renderExecutiveSummarySheet(ss, candidates, committees, evaluations) {
     var passCount = 0;
     var failCount = 0;
     var submittedCount = 0;
+    var evaluatedCount = 0;
 
     committees.forEach(function (comm) {
       var ev = cEvals[comm.id];
@@ -257,6 +258,7 @@ function renderExecutiveSummarySheet(ss, candidates, committees, evaluations) {
         var scoreVal = calculateWeightedTotalScore(ev.scores);
         commScores.push(scoreVal > 0 ? scoreVal.toFixed(2) : "-");
         totalWeighted += scoreVal;
+        if (scoreVal > 0) evaluatedCount++;
         if (ev.verdict === 'PASS') passCount++;
         if (ev.verdict === 'FAIL') failCount++;
         if (ev.isSubmitted) submittedCount++;
@@ -265,7 +267,7 @@ function renderExecutiveSummarySheet(ss, candidates, committees, evaluations) {
       }
     });
 
-    var avgScore = (totalWeighted > 0) ? (totalWeighted / committees.length).toFixed(2) : "-";
+    var avgScore = (evaluatedCount > 0) ? (totalWeighted / evaluatedCount).toFixed(2) : "-";
     var isPassUnanimous = (passCount === 5);
     var finalDecisionText = isPassUnanimous
       ? "✓ ผ่านการคัดเลือก (มติเอกฉันท์ 5/5)"
@@ -392,9 +394,9 @@ function renderCandidateSheet(ss, cand, idx, committees, criteria, evaluations) 
 
   sheet.getRange("A3:H6").setFontFamily("Sarabun").setFontSize(10).setBackground("#f8fafc");
 
-  // Table Headers (No description column as requested)
+  // Table Headers - now showing raw scores (1-5) per criterion
   var headers = [
-    ["เกณฑ์การประเมิน", "น้ำหนัก (Weight)", "EM", "MD-BPT", "MD-TARCO", "MD-BPS", "HZ", "คะแนนเฉลี่ย"]
+    ["เกณฑ์การประเมิน", "น้ำหนัก (Weight)", "EM (1-5)", "MD-BPT (1-5)", "MD-TARCO (1-5)", "MD-BPS (1-5)", "HZ (1-5)", "คะแนนเฉลี่ย (1-5)"]
   ];
   sheet.getRange("A8:H8").setValues(headers)
     .setFontFamily("Prompt").setFontSize(10).setFontWeight("bold")
@@ -406,23 +408,24 @@ function renderCandidateSheet(ss, cand, idx, committees, criteria, evaluations) 
   var scoreRows = [];
 
   criteria.forEach(function (crit) {
-    var commWeightedScores = committees.map(function (comm) {
+    // Write RAW scores (1-5) instead of weighted scores to eliminate ambiguity
+    var commRawScores = committees.map(function (comm) {
       var ev = candEvals[comm.id] || { scores: {} };
       var raw = Number((ev.scores && ev.scores[crit.id]) || 0);
-      return (raw > 0) ? Number(((raw / 5) * crit.weight).toFixed(2)) : 0;
+      return raw;
     });
 
-    var sumCrit = commWeightedScores.reduce(function (a, b) { return a + b; }, 0);
-    var avgCrit = Number((sumCrit / committees.length).toFixed(2));
+    var nonZeroScores = commRawScores.filter(function (s) { return s > 0; });
+    var avgCrit = nonZeroScores.length > 0 ? Number((nonZeroScores.reduce(function (a, b) { return a + b; }, 0) / nonZeroScores.length).toFixed(2)) : 0;
 
     scoreRows.push([
       crit.title,
       crit.weight + "%",
-      commWeightedScores[0],
-      commWeightedScores[1],
-      commWeightedScores[2],
-      commWeightedScores[3],
-      commWeightedScores[4],
+      commRawScores[0],
+      commRawScores[1],
+      commRawScores[2],
+      commRawScores[3],
+      commRawScores[4],
       avgCrit
     ]);
   });
@@ -439,7 +442,8 @@ function renderCandidateSheet(ss, cand, idx, committees, criteria, evaluations) 
     var ev = candEvals[comm.id] || { scores: {} };
     return calculateWeightedTotalScore(ev.scores || {});
   });
-  var grandAvg = Number((commTotals.reduce(function (a, b) { return a + b; }, 0) / commTotals.length).toFixed(2));
+  var nonZeroTotals = commTotals.filter(function (t) { return t > 0; });
+  var grandAvg = nonZeroTotals.length > 0 ? Number((nonZeroTotals.reduce(function (a, b) { return a + b; }, 0) / nonZeroTotals.length).toFixed(2)) : 0;
 
   var totalRowIdx = 9 + scoreRows.length;
   sheet.getRange(totalRowIdx, 1).setValue("ผลคะแนนคำนวณตามค่าน้ำหนัก (คะแนนเต็ม 100)").setFontWeight("bold");
@@ -637,7 +641,6 @@ function renderLogsSheet(ss, candidates, committees, evaluations) {
 function scanCandidateSheetsForEdits(ss, candidates, currentEvals) {
   var evals = JSON.parse(JSON.stringify(currentEvals || {}));
   var commIds = ['EM', 'MD-BPT', 'MD-TARCO', 'MD-BPS', 'HZ'];
-  var weights = [25, 25, 15, 15, 10, 10];
 
   candidates.forEach(function (cand, idx) {
     var shortName = cand.name ? (cand.name.split(' ')[0] || cand.name) : ('Candidate_' + (idx + 1));
@@ -647,7 +650,8 @@ function scanCandidateSheetsForEdits(ss, candidates, currentEvals) {
 
     if (!evals[cand.id]) evals[cand.id] = {};
 
-    // Read Score Grid from Sheet (Rows 9..14, Columns C..G which correspond to EM, MD-BPT, MD-TARCO, MD-BPS, HZ)
+    // Read Raw Score Grid from Sheet (Rows 9..14, Columns C..G which correspond to EM, MD-BPT, MD-TARCO, MD-BPS, HZ)
+    // Scores are now stored as raw 1-5 values in the sheet
     var scoreData = sheet.getRange("C9:G14").getValues();
 
     commIds.forEach(function (commId, colIdx) {
@@ -658,9 +662,8 @@ function scanCandidateSheetsForEdits(ss, candidates, currentEvals) {
 
       for (var critIdx = 0; critIdx < 6; critIdx++) {
         var val = Number(scoreData[critIdx][colIdx]) || 0;
-        var weight = weights[critIdx];
-        // Convert weighted score back to 1-5 raw score if needed, or if entered as raw score
-        var rawScore = (val > 5) ? Math.round((val / weight) * 5) : Math.round(val);
+        // Values in sheet are now raw scores (1-5), just read and clamp directly
+        var rawScore = Math.round(val);
         if (rawScore > 0) {
           scoresObj[critIdx + 1] = Math.min(5, Math.max(1, rawScore));
         }
