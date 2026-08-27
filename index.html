@@ -140,11 +140,14 @@
           </div>
         </button>
 
-        <!-- Sync Indicator & Cute Admin Button in Top-Right -->
-        <div class="flex items-center gap-2.5">
-          <div id="sync-indicator" class="opacity-0 transition-opacity duration-300 flex items-center gap-1.5 text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200 shadow-sm">
-            <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
-            ซิงค์เรียลไทม์
+        <!-- Sync Indicator & Actions -->
+        <div class="flex items-center gap-2">
+          <div id="sync-indicator" class="flex items-center gap-1.5 text-[11px] font-bold text-emerald-700 bg-emerald-50/90 px-3 py-1.5 rounded-full border border-emerald-200 shadow-2xs transition-all" title="ระบบกำลังเชื่อมต่อและดึงข้อมูลสดจาก Google Sheets อัตโนมัติทุก 3 วินาที">
+            <span class="relative flex h-2 w-2">
+              <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+              <span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+            </span>
+            <span class="tracking-wide">ซิงค์เรียลไทม์สด</span>
           </div>
 
           <!-- Cute Top-Right Admin Button -->
@@ -286,7 +289,7 @@
 
         <div class="space-y-2">
           <label class="block text-xs font-bold text-slate-700">Google Apps Script Web App URL (ลงท้ายด้วย /exec)</label>
-          <input type="url" id="gs-webhook-url" value="https://script.google.com/macros/s/AKfycbyH8mlX4NPCGOZKiH3V9LfpMRoaAhRtTDAYEgT4r0CumTeT5H9fERtL61RYTHVazuwx/exec" placeholder="https://script.google.com/macros/s/.../exec" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-xs focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 outline-none">
+          <input type="url" id="gs-webhook-url" value="https://script.google.com/macros/s/AKfycbwaRjgOcfM1Ys6sr3EJFOFORikL4e1Y4242zd9wMVlRui-ycB4BC16fI_no_VfU0Gsd/exec" placeholder="https://script.google.com/macros/s/.../exec" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-xs focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 outline-none">
           <p class="text-[10px] text-slate-500">
             * นำ URL ที่ได้จากการ Deploy Web App (Who has access: Anyone) มาใส่ที่นี่
           </p>
