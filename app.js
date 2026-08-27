@@ -3155,11 +3155,21 @@
     isSyncingWithSheets = true;
     var fetchUrl = url + (url.indexOf('?') > -1 ? '&' : '?') + '_t=' + new Date().getTime();
     
+    // Timeout after 8 seconds to prevent hung requests from blocking subsequent polls
+    var controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    var timeoutId = null;
+    if (controller) {
+      timeoutId = setTimeout(function () { controller.abort(); }, 8000);
+    }
+
     fetch(fetchUrl, {
       method: 'GET',
       cache: 'no-store',
-      headers: { 'Accept': 'application/json' }
+      headers: { 'Accept': 'application/json' },
+      redirect: 'follow',
+      signal: controller ? controller.signal : undefined
     }).then(function (response) {
+      if (timeoutId) clearTimeout(timeoutId);
       return response.json();
     }).then(function (res) {
       isSyncingWithSheets = false;
@@ -3228,6 +3238,7 @@
         }
       }
     }).catch(function (err) {
+      if (timeoutId) clearTimeout(timeoutId);
       isSyncingWithSheets = false;
       if (!isAuto) {
         showToast('ไม่สามารถดึงข้อมูลจาก Google Sheets: ' + err.message, 'error');
@@ -3237,19 +3248,27 @@
 
   function startGoogleSheetsAutoSync() {
     if (googleSyncTimer) clearInterval(googleSyncTimer);
-    // Continuous 2-way cloud auto-sync loop (every 3.5s)
+    // Continuous 2-way cloud auto-sync loop (every 2s, ultra-fast mode)
     googleSyncTimer = setInterval(function () {
       syncFromGoogleSheets(true);
-    }, 3500);
+    }, 2000);
 
     // Immediate bootsync on startup
-    setTimeout(function () {
-      syncFromGoogleSheets(true);
-    }, 150);
+    syncFromGoogleSheets(true);
+  }
 
-    setTimeout(function () {
+  // Smart Mobile / Tab Wakeup: instant sync when tab is brought back to focus or screen unblanks
+  if (typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', function () {
+      if (document.visibilityState === 'visible') {
+        syncFromGoogleSheets(true);
+      }
+    });
+  }
+  if (typeof window !== 'undefined') {
+    window.addEventListener('focus', function () {
       syncFromGoogleSheets(true);
-    }, 1500);
+    });
   }
 
   function copyGoogleAppsScriptCode() {
