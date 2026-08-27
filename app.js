@@ -1309,7 +1309,7 @@
       // KPI Key Metrics Row
       '<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">' +
       '<div class="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm flex items-center justify-between">' +
-      '<div><span class="text-xs font-semibold text-slate-500 block">ผู้ขอรับทุนทั้งหมด</span><span class="text-3xl font-black text-slate-900">' + totalCandidates + ' ท่าน</span></div>' +
+      '<div><span class="text-xs font-semibold text-slate-500 block">ผู้ขอรับทุนทั้งหมด</span><span class="text-3xl font-black text-slate-900">' + totalCandidates + ' ท่าน</span><span class="text-[11px] text-blue-600 mt-0.5 block">ครบตามเกณฑ์ PDF</span></div>' +
       '<div class="w-12 h-12 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center text-xl font-black">👥</div>' +
       '</div>' +
       '<div class="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm flex items-center justify-between">' +
